@@ -163,7 +163,11 @@
         <p class="subtitle">Safe temperature range: 46°F - 86°F</p>
         
         <div class="alert alert-info">
-            Using National Weather Service API (US locations only). For international shipments, please use a commercial weather API.
+            <strong>Important:</strong> This application uses real-time National Weather Service API data for US locations only. Forecasts are typically available for up to 7 days. If forecast data isn't available for your selected dates, you'll be notified.
+        </div>
+        
+        <div class="alert alert-warning">
+            <strong>Note:</strong> For international shipments or dates beyond 7 days, please use a commercial weather API service. This tool will not estimate temperatures with historical averages.
         </div>
         
         <div class="form-group">
@@ -198,9 +202,13 @@
         
         <button id="checkButton">Check Temperature Safety</button>
         
+        <div class="alert alert-warning" id="nwsLimitAlert" style="display:none;">
+            <strong>Warning:</strong> Your shipping period extends beyond the 7-day NWS forecast period. The application will only use actual forecast data, which may not cover your entire shipping period.
+        </div>
+        
         <div class="loading" id="loading">
             <div class="spinner"></div>
-            <p>Analyzing route temperatures using NWS weather data...</p>
+            <p>Retrieving temperature forecasts from the National Weather Service API...</p>
         </div>
         
         <div class="results" id="results">
@@ -247,6 +255,7 @@
             const violationsSection = document.getElementById('violations');
             const violationsListElement = document.getElementById('violationsList');
             const forecastTableBody = document.getElementById('forecastTableBody');
+            const nwsLimitAlert = document.getElementById('nwsLimitAlert');
             
             // Set default dates
             const today = new Date();
@@ -259,6 +268,39 @@
             // Event listeners
             checkButton.addEventListener('click', checkTemperatures);
             
+            function generateDateRange(startDateStr, endDateStr) {
+                // Takes YYYY-MM-DD strings and returns an array of date strings between them (inclusive)
+                const dateRange = [];
+                
+                // Parse start and end dates
+                const [startYear, startMonth, startDay] = startDateStr.split('-').map(Number);
+                const [endYear, endMonth, endDay] = endDateStr.split('-').map(Number);
+                
+                // Create date objects with the local components
+                let currentDate = new Date(startYear, startMonth - 1, startDay);
+                const stopDate = new Date(endYear, endMonth - 1, endDay);
+                
+                // Add 1 day to the stop date to make the range inclusive
+                stopDate.setDate(stopDate.getDate() + 1);
+                
+                // Generate all dates in the range
+                while (currentDate < stopDate) {
+                    // Get YYYY-MM-DD from the current date
+                    const year = currentDate.getFullYear();
+                    const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+                    const day = String(currentDate.getDate()).padStart(2, '0');
+                    
+                    // Create the date string in YYYY-MM-DD format
+                    const dateString = `${year}-${month}-${day}`;
+                    dateRange.push(dateString);
+                    
+                    // Move to the next day
+                    currentDate.setDate(currentDate.getDate() + 1);
+                }
+                
+                return dateRange;
+            }
+            
             async function checkTemperatures() {
                 const origin = document.getElementById('origin').value;
                 const destination = document.getElementById('destination').value;
@@ -269,6 +311,27 @@
                 if (!origin || !destination || !shipDate || !arrivalDate) {
                     alert('Please fill in all fields');
                     return;
+                }
+                
+                // Validate dates by comparing the actual string values
+                if (arrivalDate < shipDate) {
+                    alert('Arrival date must be on or after shipping date');
+                    return;
+                }
+                
+                // Calculate days difference for the warning message
+                const dateRange = generateDateRange(shipDate, arrivalDate);
+                const daysDifference = dateRange.length;
+                
+                // Warn if date range is more than 7 days as NWS forecast may not cover the entire range
+                if (daysDifference > 7) {
+                    nwsLimitAlert.style.display = 'block';
+                    const proceed = confirm(`Warning: NWS forecasts are typically only available for 7 days. Your shipping period is ${daysDifference} days (${shipDate} to ${arrivalDate}). The application will only use actual forecast data, which may not cover your entire shipping period. Continue anyway?`);
+                    if (!proceed) {
+                        return;
+                    }
+                } else {
+                    nwsLimitAlert.style.display = 'none';
                 }
                 
                 // Show loading indicator and disable button
@@ -290,12 +353,16 @@
                     displayResults(results);
                 } catch (error) {
                     console.error("Error processing request:", error);
-                    alert("There was an error processing your request: " + error.message);
+                    alert(error.message || "There was an error processing your request. Please ensure your locations are valid and try again later.");
                 } finally {
                     // Hide loading indicator and re-enable button
                     loadingSection.classList.remove('visible');
-                    resultsSection.classList.add('visible');
                     checkButton.disabled = false;
+                    
+                    // Only show results if we didn't encounter an error
+                    if (document.getElementById('resultHeader').textContent) {
+                        resultsSection.classList.add('visible');
+                    }
                 }
             }
             
@@ -489,85 +556,130 @@
             }
             
             async function getWeatherForecasts(waypoints, shipDate, arrivalDate) {
-                // Process date range
-                const startDate = new Date(shipDate);
-                const endDate = new Date(arrivalDate);
-                const daysDifference = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+                console.log("Input dates - Ship:", shipDate, "Arrival:", arrivalDate);
                 
-                let allForecasts = [];
-                
-                for (const waypoint of waypoints) {
-                    try {
-                        // Get NWS forecast data
-                        const forecastData = await getNWSForecast(waypoint, startDate, daysDifference);
-                        
-                        // Add forecasts to collection
-                        allForecasts = allForecasts.concat(forecastData);
-                    } catch (error) {
-                        console.error(`Error getting forecast for ${waypoint.name}:`, error);
-                        alert(`Could not get weather forecast for ${waypoint.name}. Please try again later.`);
-                        throw error;
+                try {
+                    // Generate the date range manually as strings to avoid timezone issues
+                    const dateRange = generateDateRange(shipDate, arrivalDate);
+                    
+                    console.log("Generated date range:", dateRange);
+                    console.log("First date:", dateRange[0]);
+                    console.log("Last date:", dateRange[dateRange.length - 1]);
+                    
+                    let allForecasts = [];
+                    
+                    for (const waypoint of waypoints) {
+                        try {
+                            // Get NWS forecast data
+                            const forecastData = await getNWSForecast(waypoint, dateRange);
+                            
+                            // Add forecasts to collection
+                            allForecasts = allForecasts.concat(forecastData);
+                        } catch (error) {
+                            console.error(`Error getting forecast for ${waypoint.name}:`, error);
+                            throw new Error(`Could not get weather forecast for ${waypoint.name}. The National Weather Service API may be experiencing issues. Please try again later.`);
+                        }
                     }
+                    
+                    return allForecasts;
+                } catch (error) {
+                    console.error("Date processing error:", error);
+                    throw new Error("There was an error processing your date range. Please ensure your dates are valid.");
                 }
-                
-                return allForecasts;
             }
             
-            async function getNWSForecast(waypoint, startDate, daysDifference) {
-                try {
-                    // Step 1: Get the grid endpoints
-                    const pointResponse = await fetch(
-                        `https://api.weather.gov/points/${waypoint.lat},${waypoint.lon}`,
-                        {
-                            headers: {
-                                'User-Agent': '(MedTemp, medication-temp-monitor.com)'
-                            }
-                        }
-                    );
-                    
-                    if (!pointResponse.ok) {
-                        throw new Error(`NWS API error: ${pointResponse.statusText}`);
-                    }
-                    
-                    const pointData = await pointResponse.json();
-                    
-                    // Step 2: Get the forecast using the grid endpoint
-                    const forecastUrl = pointData.properties.forecast;
-                    const forecastResponse = await fetch(forecastUrl, {
+            async function getNWSForecast(waypoint, dateRange) {
+                // Step 1: Get the grid endpoints
+                const pointResponse = await fetch(
+                    `https://api.weather.gov/points/${waypoint.lat},${waypoint.lon}`,
+                    {
                         headers: {
                             'User-Agent': '(MedTemp, medication-temp-monitor.com)'
                         }
-                    });
-                    
-                    if (!forecastResponse.ok) {
-                        throw new Error(`NWS Forecast API error: ${forecastResponse.statusText}`);
                     }
+                );
+                
+                if (!pointResponse.ok) {
+                    throw new Error(`NWS API error: ${pointResponse.statusText}`);
+                }
+                
+                const pointData = await pointResponse.json();
+                
+                // Step 2: Get the forecast using the grid endpoint
+                const forecastUrl = pointData.properties.forecast;
+                const forecastResponse = await fetch(forecastUrl, {
+                    headers: {
+                        'User-Agent': '(MedTemp, medication-temp-monitor.com)'
+                    }
+                });
+                
+                if (!forecastResponse.ok) {
+                    throw new Error(`NWS Forecast API error: ${forecastResponse.statusText}`);
+                }
+                
+                const forecastData = await forecastResponse.json();
+                
+                // Also get the hourly forecast for more precise data
+                const hourlyForecastUrl = pointData.properties.forecastHourly;
+                const hourlyResponse = await fetch(hourlyForecastUrl, {
+                    headers: {
+                        'User-Agent': '(MedTemp, medication-temp-monitor.com)'
+                    }
+                });
+                
+                let hourlyData = null;
+                if (hourlyResponse.ok) {
+                    hourlyData = await hourlyResponse.json();
+                }
+                
+                // Process the forecast data
+                const forecasts = [];
+                
+                // Group forecasts by day
+                const dailyForecasts = {};
+                
+                // Process the periods from the standard forecast
+                const periods = forecastData.properties.periods;
+                
+                periods.forEach(period => {
+                    // Parse the start time to get the date string in YYYY-MM-DD format
+                    const forecastDate = new Date(period.startTime);
+                    const year = forecastDate.getFullYear();
+                    const month = String(forecastDate.getMonth() + 1).padStart(2, '0');
+                    const day = String(forecastDate.getDate()).padStart(2, '0');
+                    const dateString = `${year}-${month}-${day}`;
                     
-                    const forecastData = await forecastResponse.json();
+                    if (!dailyForecasts[dateString]) {
+                        dailyForecasts[dateString] = {
+                            temps: [period.temperature],
+                            minTemp: period.temperature,
+                            maxTemp: period.temperature
+                        };
+                    } else {
+                        dailyForecasts[dateString].temps.push(period.temperature);
+                        dailyForecasts[dateString].minTemp = Math.min(
+                            dailyForecasts[dateString].minTemp, 
+                            period.temperature
+                        );
+                        dailyForecasts[dateString].maxTemp = Math.max(
+                            dailyForecasts[dateString].maxTemp, 
+                            period.temperature
+                        );
+                    }
+                });
+                
+                // If we have hourly data, use it to enhance the daily forecasts
+                if (hourlyData) {
+                    const hourlyPeriods = hourlyData.properties.periods;
                     
-                    // Process the forecast data
-                    const forecasts = [];
-                    const currentDate = new Date(startDate);
-                    
-                    // NWS provides forecasts for 7 days (14 periods - each day has day and night)
-                    const periods = forecastData.properties.periods;
-                    
-                    // Group forecasts by day
-                    const dailyForecasts = {};
-                    
-                    periods.forEach(period => {
-                        // Parse the start time to get the date
-                        const forecastDate = new Date(period.startTime);
-                        const dateString = forecastDate.toISOString().split('T')[0];
+                    hourlyPeriods.forEach(period => {
+                        const hourlyDate = new Date(period.startTime);
+                        const year = hourlyDate.getFullYear();
+                        const month = String(hourlyDate.getMonth() + 1).padStart(2, '0');
+                        const day = String(hourlyDate.getDate()).padStart(2, '0');
+                        const dateString = `${year}-${month}-${day}`;
                         
-                        if (!dailyForecasts[dateString]) {
-                            dailyForecasts[dateString] = {
-                                temps: [],
-                                minTemp: period.temperature,
-                                maxTemp: period.temperature,
-                                isDaytime: period.isDaytime
-                            };
-                        } else {
+                        if (dailyForecasts[dateString]) {
                             dailyForecasts[dateString].temps.push(period.temperature);
                             dailyForecasts[dateString].minTemp = Math.min(
                                 dailyForecasts[dateString].minTemp, 
@@ -577,162 +689,45 @@
                                 dailyForecasts[dateString].maxTemp, 
                                 period.temperature
                             );
-                            
-                            // Track if we have both day and night temps
-                            if (!dailyForecasts[dateString].isDaytime && period.isDaytime) {
-                                dailyForecasts[dateString].isDaytime = true;
-                            }
                         }
                     });
-                    
-                    // Convert daily forecasts to array and adjust min temps for nighttime
-                    for (let day = 0; day <= Math.min(7, daysDifference); day++) {
-                        const forecastDate = new Date(startDate);
-                        forecastDate.setDate(forecastDate.getDate() + day);
-                        const dateString = forecastDate.toISOString().split('T')[0];
+                }
+                
+                console.log(`Available forecast dates from NWS for ${waypoint.name}:`, Object.keys(dailyForecasts));
+                console.log(`Requested date range:`, dateRange);
+                
+                // Create forecasts for each date in our date range
+                for (const targetDate of dateRange) {
+                    if (dailyForecasts[targetDate]) {
+                        const dayForecast = dailyForecasts[targetDate];
                         
-                        if (dailyForecasts[dateString]) {
-                            const dayForecast = dailyForecasts[dateString];
-                            
-                            // Calculate average temp
-                            const avgTemp = dayForecast.temps.reduce((sum, temp) => sum + temp, 0) / 
-                                           dayForecast.temps.length;
-                            
-                            forecasts.push({
-                                location: waypoint.name,
-                                state: waypoint.state,
-                                date: dateString,
-                                temperature: Math.round(avgTemp),
-                                minTemp: Math.round(dayForecast.minTemp),
-                                maxTemp: Math.round(dayForecast.maxTemp)
-                            });
-                        }
-                    }
-                    
-                    // For days beyond the 7-day forecast, use climate-based projections
-                    if (daysDifference > 7) {
-                        // Use last available forecast as basis for extended forecast
-                        const lastAvailableForecast = forecasts[forecasts.length - 1];
+                        // Calculate average temp
+                        const avgTemp = dayForecast.temps.reduce((sum, temp) => sum + temp, 0) / 
+                                       dayForecast.temps.length;
                         
-                        for (let day = 8; day <= daysDifference; day++) {
-                            const forecastDate = new Date(startDate);
-                            forecastDate.setDate(forecastDate.getDate() + day);
-                            const dateString = forecastDate.toISOString().split('T')[0];
-                            
-                            // Add some variability for extended forecasts
-                            const tempVariability = 3 + Math.floor(day - 7); // Increases with time
-                            
-                            forecasts.push({
-                                location: waypoint.name,
-                                state: waypoint.state,
-                                date: dateString,
-                                temperature: lastAvailableForecast.temperature,
-                                minTemp: Math.round(lastAvailableForecast.minTemp - tempVariability),
-                                maxTemp: Math.round(lastAvailableForecast.maxTemp + tempVariability),
-                                isExtended: true
-                            });
-                        }
-                    }
-                    
-                    return forecasts;
-                } catch (error) {
-                    console.error("Error fetching NWS forecast:", error);
-                    
-                    // If NWS API fails, fall back to historical climate data
-                    // This is a simplified approach for demonstration
-                    const fallbackForecasts = [];
-                    const currentDate = new Date(startDate);
-                    
-                    for (let day = 0; day <= daysDifference; day++) {
-                        const forecastDate = new Date(currentDate);
-                        forecastDate.setDate(forecastDate.getDate() + day);
-                        
-                        // Get temperature estimates based on location and date
-                        const tempEstimate = getHistoricalTemperature(waypoint, forecastDate);
-                        
-                        fallbackForecasts.push({
+                        forecasts.push({
                             location: waypoint.name,
                             state: waypoint.state,
-                            date: forecastDate.toISOString().split('T')[0],
-                            temperature: tempEstimate.avg,
-                            minTemp: tempEstimate.min,
-                            maxTemp: tempEstimate.max,
-                            isHistorical: true
+                            date: targetDate,
+                            temperature: Math.round(avgTemp),
+                            minTemp: Math.round(dayForecast.minTemp),
+                            maxTemp: Math.round(dayForecast.maxTemp)
                         });
-                    }
-                    
-                    return fallbackForecasts;
-                }
-            }
-            
-            function getHistoricalTemperature(waypoint, date) {
-                // Get historical average temperatures based on location and month
-                // This is a simplified model based on US climate regions
-                const month = date.getMonth(); // 0-11
-                const lat = waypoint.lat;
-                
-                let avgTemp, minTemp, maxTemp;
-                
-                // Northern regions (roughly above 40°N)
-                if (lat > 40) {
-                    if (month === 0 || month === 1 || month === 11) { // Winter
-                        avgTemp = 30;
-                        minTemp = 20;
-                        maxTemp = 40;
-                    } else if (month >= 5 && month <= 8) { // Summer
-                        avgTemp = 75;
-                        minTemp = 65;
-                        maxTemp = 85;
-                    } else { // Spring/Fall
-                        avgTemp = 55;
-                        minTemp = 45;
-                        maxTemp = 65;
-                    }
-                }
-                // Central regions (roughly 35-40°N)
-                else if (lat > 35) {
-                    if (month === 0 || month === 1 || month === 11) { // Winter
-                        avgTemp = 40;
-                        minTemp = 30;
-                        maxTemp = 50;
-                    } else if (month >= 5 && month <= 8) { // Summer
-                        avgTemp = 85;
-                        minTemp = 75;
-                        maxTemp = 95;
-                    } else { // Spring/Fall
-                        avgTemp = 65;
-                        minTemp = 55;
-                        maxTemp = 75;
-                    }
-                }
-                // Southern regions (roughly below 35°N)
-                else {
-                    if (month === 0 || month === 1 || month === 11) { // Winter
-                        avgTemp = 55;
-                        minTemp = 45;
-                        maxTemp = 65;
-                    } else if (month >= 5 && month <= 8) { // Summer
-                        avgTemp = 90;
-                        minTemp = 80;
-                        maxTemp = 100;
-                    } else { // Spring/Fall
-                        avgTemp = 75;
-                        minTemp = 65;
-                        maxTemp = 85;
+                    } else {
+                        console.warn(`No forecast data available for ${targetDate} at ${waypoint.name}`);
                     }
                 }
                 
-                // Add some randomness to simulate day-to-day variability
-                const variability = 5;
-                avgTemp += Math.random() * variability * 2 - variability;
-                minTemp += Math.random() * variability * 2 - variability;
-                maxTemp += Math.random() * variability * 2 - variability;
+                // Check if we have any forecasts
+                if (forecasts.length === 0) {
+                    throw new Error(`No NWS forecast data available for ${waypoint.name} within your shipping dates. Please try again later or adjust your date range.`);
+                }
                 
-                return {
-                    avg: Math.round(avgTemp),
-                    min: Math.round(minTemp),
-                    max: Math.round(maxTemp)
-                };
+                // Log available dates for debugging
+                console.log(`Final forecasts for ${waypoint.name}:`, forecasts.map(f => f.date));
+                console.log(`Total forecasts: ${forecasts.length} out of ${dateRange.length} requested dates`);
+                
+                return forecasts;
             }
             
             function processForecasts(forecasts) {
@@ -774,14 +769,18 @@
                     
                     // Sort violations by date
                     const sortedViolations = [...results.violations].sort((a, b) => 
-                        new Date(a.date) - new Date(b.date)
+                        a.date.localeCompare(b.date)
                     );
                     
                     sortedViolations.forEach(violation => {
                         const violationElement = document.createElement('div');
                         violationElement.className = 'violation-item';
                         
-                        const date = new Date(violation.date).toLocaleDateString('en-US', {
+                        // Parse date correctly to display
+                        const [year, month, day] = violation.date.split('-').map(Number);
+                        const dateObj = new Date(year, month - 1, day);
+                        
+                        const date = dateObj.toLocaleDateString('en-US', {
                             weekday: 'short',
                             month: 'short', 
                             day: 'numeric'
@@ -801,13 +800,6 @@
                         
                         tempMessage += ` - ${violationType.join(", ")}`;
                         
-                        // Note if this is an extended forecast
-                        if (violation.isExtended) {
-                            tempMessage += ' (extended forecast)';
-                        } else if (violation.isHistorical) {
-                            tempMessage += ' (historical average)';
-                        }
-                        
                         violationElement.textContent = `${date} at ${violation.location} (${violation.state}): ${tempMessage}`;
                         violationsListElement.appendChild(violationElement);
                     });
@@ -821,7 +813,7 @@
                 // Sort forecasts by date and location
                 const sortedForecasts = [...results.allForecasts].sort((a, b) => {
                     // First sort by date
-                    const dateComparison = new Date(a.date) - new Date(b.date);
+                    const dateComparison = a.date.localeCompare(b.date);
                     if (dateComparison !== 0) return dateComparison;
                     
                     // Then by location
@@ -831,7 +823,11 @@
                 sortedForecasts.forEach(forecast => {
                     const row = document.createElement('tr');
                     
-                    const date = new Date(forecast.date).toLocaleDateString('en-US', {
+                    // Parse date correctly to display
+                    const [year, month, day] = forecast.date.split('-').map(Number);
+                    const dateObj = new Date(year, month - 1, day);
+                    
+                    const date = dateObj.toLocaleDateString('en-US', {
                         weekday: 'short',
                         month: 'short', 
                         day: 'numeric'
@@ -850,17 +846,9 @@
                         statusClass = "safe";
                     }
                     
-                    // Mark extended forecasts
-                    let locationText = forecast.location;
-                    if (forecast.isExtended) {
-                        locationText += " (extended)";
-                    } else if (forecast.isHistorical) {
-                        locationText += " (historical)";
-                    }
-                    
                     row.innerHTML = `
                         <td>${date}</td>
-                        <td>${locationText}</td>
+                        <td>${forecast.location}</td>
                         <td>${forecast.minTemp}°F</td>
                         <td>${forecast.maxTemp}°F</td>
                         <td class="${statusClass}">${status}</td>
