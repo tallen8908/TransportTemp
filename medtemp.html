@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MedTemp: Medication Temperature Monitor</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 25px;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #7f8c8d;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        .results {
+            margin-top: 30px;
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+            display: none;
+        }
+        .results.visible {
+            display: block;
+        }
+        .result-header {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 15px;
+        }
+        .safe {
+            color: #27ae60;
+        }
+        .unsafe {
+            color: #c0392b;
+        }
+        .temperature-range {
+            text-align: center;
+            font-size: 18px;
+            margin-bottom: 20px;
+        }
+        .violations {
+            margin-top: 20px;
+        }
+        .violation-item {
+            background-color: #ffecec;
+            border-left: 4px solid #c0392b;
+            padding: 10px 15px;
+            margin-bottom: 8px;
+            border-radius: 0 4px 4px 0;
+        }
+        .forecast-detail {
+            margin-top: 30px;
+        }
+        .forecast-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        .forecast-table th, .forecast-table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        .forecast-table th {
+            background-color: #f2f2f2;
+        }
+        .forecast-table tr:hover {
+            background-color: #f5f5f5;
+        }
+        .alert {
+            padding: 10px 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+            border-left: 4px solid;
+        }
+        .alert-warning {
+            background-color: #fff3cd;
+            border-color: #ffeeba;
+            color: #856404;
+        }
+        .alert-info {
+            background-color: #d1ecf1;
+            border-color: #bee5eb;
+            color: #0c5460;
+        }
+        .loading {
+            text-align: center;
+            display: none;
+        }
+        .loading.visible {
+            display: block;
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-top: 4px solid #3498db;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>MedTemp: Medication Temperature Monitor</h1>
+        <p class="subtitle">Safe temperature range: 46°F - 86°F</p>
+        
+        <div class="alert alert-info">
+            <strong>Important:</strong> This application uses real-time National Weather Service API data for US locations only. Forecasts are typically available for up to 7 days. If forecast data isn't available for your selected dates, you'll be notified.
+        </div>
+        
+        <div class="alert alert-warning">
+            <strong>Note:</strong> For international shipments or dates beyond 7 days, please use a commercial weather API service. This tool will not estimate temperatures with historical averages.
+        </div>
+        
+        <div class="form-group">
+            <label for="origin">Origin (City, State):</label>
+            <input type="text" id="origin" placeholder="e.g., Boston, MA">
+        </div>
+        
+        <div class="form-group">
+            <label for="destination">Destination (City, State):</label>
+            <input type="text" id="destination" placeholder="e.g., Miami, FL">
+        </div>
+        
+        <div class="form-group">
+            <label for="shipDate">Shipping Date:</label>
+            <input type="date" id="shipDate">
+        </div>
+        
+        <div class="form-group">
+            <label for="arrivalDate">Estimated Arrival Date:</label>
+            <input type="date" id="arrivalDate">
+        </div>
+        
+        <div class="form-group">
+            <label for="carrier">Shipping Carrier:</label>
+            <select id="carrier">
+                <option value="usps">USPS</option>
+                <option value="ups">UPS</option>
+                <option value="fedex">FedEx</option>
+                <option value="dhl">DHL</option>
+            </select>
+        </div>
+        
+        <button id="checkButton">Check Temperature Safety</button>
+        
+        <div class="alert alert-warning" id="nwsLimitAlert" style="display:none;">
+            <strong>Warning:</strong> Your shipping period extends beyond the 7-day NWS forecast period. The application will only use actual forecast data, which may not cover your entire shipping period.
+        </div>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Retrieving temperature forecasts from the National Weather Service API...</p>
+        </div>
+        
+        <div class="results" id="results">
+            <div id="resultHeader" class="result-header"></div>
+            <div id="temperatureRange" class="temperature-range"></div>
+            
+            <div class="violations" id="violations">
+                <h3>Temperature Violations:</h3>
+                <div id="violationsList"></div>
+            </div>
+            
+            <div class="forecast-detail" id="forecastDetail">
+                <h3>Detailed Forecast:</h3>
+                <table class="forecast-table" id="forecastTable">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Location</th>
+                            <th>Min Temp</th>
+                            <th>Max Temp</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="forecastTableBody">
+                        <!-- Forecast data will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Constants
+            const TEMP_MIN = 46;
+            const TEMP_MAX = 86;
+            
+            // Elements
+            const checkButton = document.getElementById('checkButton');
+            const loadingSection = document.getElementById('loading');
+            const resultsSection = document.getElementById('results');
+            const resultHeaderElement = document.getElementById('resultHeader');
+            const temperatureRangeElement = document.getElementById('temperatureRange');
+            const violationsSection = document.getElementById('violations');
+            const violationsListElement = document.getElementById('violationsList');
+            const forecastTableBody = document.getElementById('forecastTableBody');
+            const nwsLimitAlert = document.getElementById('nwsLimitAlert');
+            
+            // Set default dates
+            const today = new Date();
+            const nextWeek = new Date(today);
+            nextWeek.setDate(nextWeek.getDate() + 7);
+            
+            document.getElementById('shipDate').valueAsDate = today;
+            document.getElementById('arrivalDate').valueAsDate = nextWeek;
+            
+            // Event listeners
+            checkButton.addEventListener('click', checkTemperatures);
+            
+            function generateDateRange(startDateStr, endDateStr) {
+                // Takes YYYY-MM-DD strings and returns an array of date strings between them (inclusive)
+                const dateRange = [];
+                
+                // Parse start and end dates
+                const [startYear, startMonth, startDay] = startDateStr.split('-').map(Number);
+                const [endYear, endMonth, endDay] = endDateStr.split('-').map(Number);
+                
+                // Create date objects with the local components
+                let currentDate = new Date(startYear, startMonth - 1, startDay);
+                const stopDate = new Date(endYear, endMonth - 1, endDay);
+                
+                // Add 1 day to the stop date to make the range inclusive
+                stopDate.setDate(stopDate.getDate() + 1);
+                
+                // Generate all dates in the range
+                while (currentDate < stopDate) {
+                    // Get YYYY-MM-DD from the current date
+                    const year = currentDate.getFullYear();
+                    const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+                    const day = String(currentDate.getDate()).padStart(2, '0');
+                    
+                    // Create the date string in YYYY-MM-DD format
+                    const dateString = `${year}-${month}-${day}`;
+                    dateRange.push(dateString);
+                    
+                    // Move to the next day
+                    currentDate.setDate(currentDate.getDate() + 1);
+                }
+                
+                return dateRange;
+            }
+            
+            async function checkTemperatures() {
+                const origin = document.getElementById('origin').value;
+                const destination = document.getElementById('destination').value;
+                const shipDate = document.getElementById('shipDate').value;
+                const arrivalDate = document.getElementById('arrivalDate').value;
+                const carrier = document.getElementById('carrier').value;
+                
+                if (!origin || !destination || !shipDate || !arrivalDate) {
+                    alert('Please fill in all fields');
+                    return;
+                }
+                
+                // Validate dates by comparing the actual string values
+                if (arrivalDate < shipDate) {
+                    alert('Arrival date must be on or after shipping date');
+                    return;
+                }
+                
+                // Calculate days difference for the warning message
+                const dateRange = generateDateRange(shipDate, arrivalDate);
+                const daysDifference = dateRange.length;
+                
+                // Warn if date range is more than 7 days as NWS forecast may not cover the entire range
+                if (daysDifference > 7) {
+                    nwsLimitAlert.style.display = 'block';
+                    const proceed = confirm(`Warning: NWS forecasts are typically only available for 7 days. Your shipping period is ${daysDifference} days (${shipDate} to ${arrivalDate}). The application will only use actual forecast data, which may not cover your entire shipping period. Continue anyway?`);
+                    if (!proceed) {
+                        return;
+                    }
+                } else {
+                    nwsLimitAlert.style.display = 'none';
+                }
+                
+                // Show loading indicator and disable button
+                loadingSection.classList.add('visible');
+                resultsSection.classList.remove('visible');
+                checkButton.disabled = true;
+                
+                try {
+                    // 1. Get the waypoints for our route
+                    const waypoints = await getRouteWaypoints(origin, destination, carrier);
+                    
+                    // 2. Get real weather data for each waypoint
+                    const forecasts = await getWeatherForecasts(waypoints, shipDate, arrivalDate);
+                    
+                    // 3. Process results
+                    const results = processForecasts(forecasts);
+                    
+                    // 4. Display the results
+                    displayResults(results);
+                } catch (error) {
+                    console.error("Error processing request:", error);
+                    alert(error.message || "There was an error processing your request. Please ensure your locations are valid and try again later.");
+                } finally {
+                    // Hide loading indicator and re-enable button
+                    loadingSection.classList.remove('visible');
+                    checkButton.disabled = false;
+                    
+                    // Only show results if we didn't encounter an error
+                    if (document.getElementById('resultHeader').textContent) {
+                        resultsSection.classList.add('visible');
+                    }
+                }
+            }
+            
+            async function getRouteWaypoints(origin, destination, carrier) {
+                try {
+                    // Get origin and destination coordinates
+                    const originCoords = await geocodeLocation(origin);
+                    const destinationCoords = await geocodeLocation(destination);
+                    
+                    if (!originCoords || !destinationCoords) {
+                        throw new Error("Couldn't find one or both locations. Please check spelling.");
+                    }
+                    
+                    // Start with origin and destination
+                    const waypoints = [
+                        { 
+                            name: originCoords.displayName || origin, 
+                            state: 'Origin',
+                            lat: originCoords.lat,
+                            lon: originCoords.lon 
+                        },
+                        { 
+                            name: destinationCoords.displayName || destination, 
+                            state: 'Destination',
+                            lat: destinationCoords.lat,
+                            lon: destinationCoords.lon
+                        }
+                    ];
+                    
+                    // Calculate distance between points
+                    const distance = calculateDistance(
+                        originCoords.lat, originCoords.lon,
+                        destinationCoords.lat, destinationCoords.lon
+                    );
+                    
+                    // For longer distances (more than 500 miles), add carrier hubs
+                    if (distance > 500) {
+                        if (carrier === 'fedex') {
+                            // Add Memphis hub for FedEx
+                            const memphisCoords = await geocodeLocation('Memphis, TN');
+                            waypoints.splice(1, 0, {
+                                name: 'Memphis, TN',
+                                state: 'FedEx Hub',
+                                lat: memphisCoords.lat,
+                                lon: memphisCoords.lon
+                            });
+                        } else if (carrier === 'ups') {
+                            // Add Louisville hub for UPS
+                            const louisvilleCoords = await geocodeLocation('Louisville, KY');
+                            waypoints.splice(1, 0, {
+                                name: 'Louisville, KY',
+                                state: 'UPS Hub',
+                                lat: louisvilleCoords.lat,
+                                lon: louisvilleCoords.lon
+                            });
+                        } else if (carrier === 'usps') {
+                            // Use major distribution center
+                            const dcCoords = await findNearestDistributionCenter(originCoords, destinationCoords);
+                            waypoints.splice(1, 0, dcCoords);
+                        }
+                    }
+                    
+                    return waypoints;
+                } catch (error) {
+                    console.error("Error getting waypoints:", error);
+                    throw error;
+                }
+            }
+            
+            async function geocodeLocation(location) {
+                try {
+                    // Use OpenStreetMap Nominatim API for geocoding
+                    const encodedLocation = encodeURIComponent(location);
+                    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodedLocation}&countrycodes=us&limit=1`);
+                    
+                    if (!response.ok) {
+                        throw new Error(`Geocoding error: ${response.statusText}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (data && data.length > 0) {
+                        // Extract city and state from address
+                        const address = data[0].display_name;
+                        const addressParts = address.split(', ');
+                        
+                        // Try to get city and state
+                        let cityState = address;
+                        if (addressParts.length >= 3) {
+                            // Most US addresses have city at position 0 and state at position 1 or 2
+                            const city = addressParts[0];
+                            // Look for a 2-letter state code (most US states)
+                            let state = '';
+                            for (let i = 1; i < Math.min(4, addressParts.length); i++) {
+                                if (/^[A-Z]{2}$/.test(addressParts[i])) {
+                                    state = addressParts[i];
+                                    break;
+                                }
+                            }
+                            
+                            if (state) {
+                                cityState = `${city}, ${state}`;
+                            }
+                        }
+                        
+                        return {
+                            lat: parseFloat(data[0].lat),
+                            lon: parseFloat(data[0].lon),
+                            displayName: cityState
+                        };
+                    } else {
+                        throw new Error(`Location not found: ${location}`);
+                    }
+                } catch (error) {
+                    console.error("Geocoding error:", error);
+                    throw error;
+                }
+            }
+            
+            function calculateDistance(lat1, lon1, lat2, lon2) {
+                // Haversine formula to calculate distance between two points
+                const R = 3958.8; // Earth's radius in miles
+                const dLat = toRad(lat2 - lat1);
+                const dLon = toRad(lon2 - lon1);
+                const a = 
+                    Math.sin(dLat/2) * Math.sin(dLat/2) +
+                    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * 
+                    Math.sin(dLon/2) * Math.sin(dLon/2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+                return R * c;
+            }
+            
+            function toRad(deg) {
+                return deg * (Math.PI/180);
+            }
+            
+            async function findNearestDistributionCenter(originCoords, destCoords) {
+                // Major USPS distribution centers
+                const centerNames = [
+                    "Chicago, IL", 
+                    "Atlanta, GA", 
+                    "Denver, CO", 
+                    "Dallas, TX",
+                    "Los Angeles, CA",
+                    "New York, NY",
+                    "Seattle, WA"
+                ];
+                
+                // Get coordinates for each center
+                const centers = [];
+                for (const centerName of centerNames) {
+                    try {
+                        const coords = await geocodeLocation(centerName);
+                        centers.push({
+                            name: centerName,
+                            state: "USPS Center",
+                            lat: coords.lat,
+                            lon: coords.lon
+                        });
+                    } catch (error) {
+                        console.error(`Error geocoding ${centerName}:`, error);
+                    }
+                }
+                
+                if (centers.length === 0) {
+                    // Fallback to Chicago if we couldn't geocode any centers
+                    return {
+                        name: "Chicago, IL",
+                        state: "USPS Center",
+                        lat: 41.8781,
+                        lon: -87.6298
+                    };
+                }
+                
+                // Find center closest to the midpoint between origin and destination
+                const midLat = (originCoords.lat + destCoords.lat) / 2;
+                const midLon = (originCoords.lon + destCoords.lon) / 2;
+                
+                let nearestCenter = centers[0];
+                let shortestDistance = calculateDistance(midLat, midLon, centers[0].lat, centers[0].lon);
+                
+                for (let i = 1; i < centers.length; i++) {
+                    const distance = calculateDistance(midLat, midLon, centers[i].lat, centers[i].lon);
+                    if (distance < shortestDistance) {
+                        shortestDistance = distance;
+                        nearestCenter = centers[i];
+                    }
+                }
+                
+                return nearestCenter;
+            }
+            
+            async function getWeatherForecasts(waypoints, shipDate, arrivalDate) {
+                console.log("Input dates - Ship:", shipDate, "Arrival:", arrivalDate);
+                
+                try {
+                    // Generate the date range manually as strings to avoid timezone issues
+                    const dateRange = generateDateRange(shipDate, arrivalDate);
+                    
+                    console.log("Generated date range:", dateRange);
+                    console.log("First date:", dateRange[0]);
+                    console.log("Last date:", dateRange[dateRange.length - 1]);
+                    
+                    let allForecasts = [];
+                    
+                    for (const waypoint of waypoints) {
+                        try {
+                            // Get NWS forecast data
+                            const forecastData = await getNWSForecast(waypoint, dateRange);
+                            
+                            // Add forecasts to collection
+                            allForecasts = allForecasts.concat(forecastData);
+                        } catch (error) {
+                            console.error(`Error getting forecast for ${waypoint.name}:`, error);
+                            throw new Error(`Could not get weather forecast for ${waypoint.name}. The National Weather Service API may be experiencing issues. Please try again later.`);
+                        }
+                    }
+                    
+                    return allForecasts;
+                } catch (error) {
+                    console.error("Date processing error:", error);
+                    throw new Error("There was an error processing your date range. Please ensure your dates are valid.");
+                }
+            }
+            
+            async function getNWSForecast(waypoint, dateRange) {
+                // Step 1: Get the grid endpoints
+                const pointResponse = await fetch(
+                    `https://api.weather.gov/points/${waypoint.lat},${waypoint.lon}`,
+                    {
+                        headers: {
+                            'User-Agent': '(MedTemp, medication-temp-monitor.com)'
+                        }
+                    }
+                );
+                
+                if (!pointResponse.ok) {
+                    throw new Error(`NWS API error: ${pointResponse.statusText}`);
+                }
+                
+                const pointData = await pointResponse.json();
+                
+                // Step 2: Get the forecast using the grid endpoint
+                const forecastUrl = pointData.properties.forecast;
+                const forecastResponse = await fetch(forecastUrl, {
+                    headers: {
+                        'User-Agent': '(MedTemp, medication-temp-monitor.com)'
+                    }
+                });
+                
+                if (!forecastResponse.ok) {
+                    throw new Error(`NWS Forecast API error: ${forecastResponse.statusText}`);
+                }
+                
+                const forecastData = await forecastResponse.json();
+                
+                // Also get the hourly forecast for more precise data
+                const hourlyForecastUrl = pointData.properties.forecastHourly;
+                const hourlyResponse = await fetch(hourlyForecastUrl, {
+                    headers: {
+                        'User-Agent': '(MedTemp, medication-temp-monitor.com)'
+                    }
+                });
+                
+                let hourlyData = null;
+                if (hourlyResponse.ok) {
+                    hourlyData = await hourlyResponse.json();
+                }
+                
+                // Process the forecast data
+                const forecasts = [];
+                
+                // Group forecasts by day
+                const dailyForecasts = {};
+                
+                // Process the periods from the standard forecast
+                const periods = forecastData.properties.periods;
+                
+                periods.forEach(period => {
+                    // Parse the start time to get the date string in YYYY-MM-DD format
+                    const forecastDate = new Date(period.startTime);
+                    const year = forecastDate.getFullYear();
+                    const month = String(forecastDate.getMonth() + 1).padStart(2, '0');
+                    const day = String(forecastDate.getDate()).padStart(2, '0');
+                    const dateString = `${year}-${month}-${day}`;
+                    
+                    if (!dailyForecasts[dateString]) {
+                        dailyForecasts[dateString] = {
+                            temps: [period.temperature],
+                            minTemp: period.temperature,
+                            maxTemp: period.temperature
+                        };
+                    } else {
+                        dailyForecasts[dateString].temps.push(period.temperature);
+                        dailyForecasts[dateString].minTemp = Math.min(
+                            dailyForecasts[dateString].minTemp, 
+                            period.temperature
+                        );
+                        dailyForecasts[dateString].maxTemp = Math.max(
+                            dailyForecasts[dateString].maxTemp, 
+                            period.temperature
+                        );
+                    }
+                });
+                
+                // If we have hourly data, use it to enhance the daily forecasts
+                if (hourlyData) {
+                    const hourlyPeriods = hourlyData.properties.periods;
+                    
+                    hourlyPeriods.forEach(period => {
+                        const hourlyDate = new Date(period.startTime);
+                        const year = hourlyDate.getFullYear();
+                        const month = String(hourlyDate.getMonth() + 1).padStart(2, '0');
+                        const day = String(hourlyDate.getDate()).padStart(2, '0');
+                        const dateString = `${year}-${month}-${day}`;
+                        
+                        if (dailyForecasts[dateString]) {
+                            dailyForecasts[dateString].temps.push(period.temperature);
+                            dailyForecasts[dateString].minTemp = Math.min(
+                                dailyForecasts[dateString].minTemp, 
+                                period.temperature
+                            );
+                            dailyForecasts[dateString].maxTemp = Math.max(
+                                dailyForecasts[dateString].maxTemp, 
+                                period.temperature
+                            );
+                        }
+                    });
+                }
+                
+                console.log(`Available forecast dates from NWS for ${waypoint.name}:`, Object.keys(dailyForecasts));
+                console.log(`Requested date range:`, dateRange);
+                
+                // Create forecasts for each date in our date range
+                for (const targetDate of dateRange) {
+                    if (dailyForecasts[targetDate]) {
+                        const dayForecast = dailyForecasts[targetDate];
+                        
+                        // Calculate average temp
+                        const avgTemp = dayForecast.temps.reduce((sum, temp) => sum + temp, 0) / 
+                                       dayForecast.temps.length;
+                        
+                        forecasts.push({
+                            location: waypoint.name,
+                            state: waypoint.state,
+                            date: targetDate,
+                            temperature: Math.round(avgTemp),
+                            minTemp: Math.round(dayForecast.minTemp),
+                            maxTemp: Math.round(dayForecast.maxTemp)
+                        });
+                    } else {
+                        console.warn(`No forecast data available for ${targetDate} at ${waypoint.name}`);
+                    }
+                }
+                
+                // Check if we have any forecasts
+                if (forecasts.length === 0) {
+                    throw new Error(`No NWS forecast data available for ${waypoint.name} within your shipping dates. Please try again later or adjust your date range.`);
+                }
+                
+                // Log available dates for debugging
+                console.log(`Final forecasts for ${waypoint.name}:`, forecasts.map(f => f.date));
+                console.log(`Total forecasts: ${forecasts.length} out of ${dateRange.length} requested dates`);
+                
+                return forecasts;
+            }
+            
+            function processForecasts(forecasts) {
+                // Find violations - a day is in violation if any part of the temperature range is outside safe limits
+                const violations = forecasts.filter(forecast => 
+                    forecast.minTemp < TEMP_MIN || 
+                    forecast.maxTemp > TEMP_MAX
+                );
+                
+                // Calculate min and max temperatures
+                const minTemps = forecasts.map(f => f.minTemp);
+                const maxTemps = forecasts.map(f => f.maxTemp);
+                const lowestTemp = Math.min(...minTemps);
+                const highestTemp = Math.max(...maxTemps);
+                
+                return {
+                    isSafe: violations.length === 0,
+                    violations: violations,
+                    lowestTemp: lowestTemp,
+                    highestTemp: highestTemp,
+                    allForecasts: forecasts
+                };
+            }
+            
+            function displayResults(results) {
+                // Update result header
+                resultHeaderElement.textContent = results.isSafe ? 
+                    "SAFE TO SHIP ✓" : 
+                    "UNSAFE TEMPERATURES EXPECTED ✗";
+                resultHeaderElement.className = 'result-header ' + (results.isSafe ? 'safe' : 'unsafe');
+                
+                // Update temperature range
+                temperatureRangeElement.textContent = `Expected Temperature Range: ${results.lowestTemp}°F - ${results.highestTemp}°F`;
+                
+                // Update violations
+                if (results.violations.length > 0) {
+                    violationsSection.style.display = 'block';
+                    violationsListElement.innerHTML = '';
+                    
+                    // Sort violations by date
+                    const sortedViolations = [...results.violations].sort((a, b) => 
+                        a.date.localeCompare(b.date)
+                    );
+                    
+                    sortedViolations.forEach(violation => {
+                        const violationElement = document.createElement('div');
+                        violationElement.className = 'violation-item';
+                        
+                        // Parse date correctly to display
+                        const [year, month, day] = violation.date.split('-').map(Number);
+                        const dateObj = new Date(year, month - 1, day);
+                        
+                        const date = dateObj.toLocaleDateString('en-US', {
+                            weekday: 'short',
+                            month: 'short', 
+                            day: 'numeric'
+                        });
+                        
+                        // Format the violation message
+                        let tempMessage = `${violation.temperature}°F (range: ${violation.minTemp}°F - ${violation.maxTemp}°F)`;
+                        let violationType = [];
+                        
+                        // Highlight which part of the range causes the violation
+                        if (violation.minTemp < TEMP_MIN) {
+                            violationType.push(`Too cold (below ${TEMP_MIN}°F)`);
+                        }
+                        if (violation.maxTemp > TEMP_MAX) {
+                            violationType.push(`Too hot (above ${TEMP_MAX}°F)`);
+                        }
+                        
+                        tempMessage += ` - ${violationType.join(", ")}`;
+                        
+                        violationElement.textContent = `${date} at ${violation.location} (${violation.state}): ${tempMessage}`;
+                        violationsListElement.appendChild(violationElement);
+                    });
+                } else {
+                    violationsSection.style.display = 'none';
+                }
+                
+                // Update forecast detail table
+                forecastTableBody.innerHTML = '';
+                
+                // Sort forecasts by date and location
+                const sortedForecasts = [...results.allForecasts].sort((a, b) => {
+                    // First sort by date
+                    const dateComparison = a.date.localeCompare(b.date);
+                    if (dateComparison !== 0) return dateComparison;
+                    
+                    // Then by location
+                    return a.location.localeCompare(b.location);
+                });
+                
+                sortedForecasts.forEach(forecast => {
+                    const row = document.createElement('tr');
+                    
+                    // Parse date correctly to display
+                    const [year, month, day] = forecast.date.split('-').map(Number);
+                    const dateObj = new Date(year, month - 1, day);
+                    
+                    const date = dateObj.toLocaleDateString('en-US', {
+                        weekday: 'short',
+                        month: 'short', 
+                        day: 'numeric'
+                    });
+                    
+                    // Determine status
+                    let status, statusClass;
+                    if (forecast.minTemp < TEMP_MIN) {
+                        status = "Too Cold";
+                        statusClass = "unsafe";
+                    } else if (forecast.maxTemp > TEMP_MAX) {
+                        status = "Too Hot";
+                        statusClass = "unsafe";
+                    } else {
+                        status = "Safe";
+                        statusClass = "safe";
+                    }
+                    
+                    row.innerHTML = `
+                        <td>${date}</td>
+                        <td>${forecast.location}</td>
+                        <td>${forecast.minTemp}°F</td>
+                        <td>${forecast.maxTemp}°F</td>
+                        <td class="${statusClass}">${status}</td>
+                    `;
+                    
+                    forecastTableBody.appendChild(row);
+                });
+            }
+        });
+    </script>
+</body>
+</html>
